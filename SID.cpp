@@ -120,6 +120,7 @@ void initialize()
 	// interrupt mask register: enable timer1 overflow
 	TIMSK |= (1 << TOIE1);	
 #else
+	// GG TODO Check Arduino has an ATmega328P
 	// TIMER2 used to generate sample and ms interrupts
 	// TIMER2: Normal Mode
 	TCCR2A = 0 ;
@@ -210,13 +211,17 @@ static void waveforms()
 		}
 		phase[i]=tempphase;
 	}
+
 	
 	// voice filter selection
 	temp=0; // direct output variable
 	temp1=0; // filter output variable
+
+	// VOICE 1
 	if(Sid.block.RES_Filt&FILT1) temp1+=sig[0];
 	else temp+=sig[0];
 
+	// VOICE 2 & VOICE 4 
         {
           uint16_t directVoice2=0, filterVoice2=0;
           if(Sid.block.RES_Filt&FILT2) filterVoice2+=sig[1];
@@ -224,7 +229,8 @@ static void waveforms()
           // VOICE2 Only
           leftOutput= remapDirectFilter( directVoice2, filterVoice2);
         }
-        
+
+	// VOICE 3 	
         if(Sid.block.RES_Filt&FILT3) temp1+=sig[2];
 	else if(!(Sid.block.Mode_Vol&VOICE3OFF))temp+=sig[2]; // voice 3 with special turn off bit
 
@@ -379,39 +385,73 @@ void SID::begin()
 	sustain times are calculated.
 	If an invalid register is requested the returned value will be 0.
 
+        
+        Even with more then 3 voices we want retain SID registry comapatibility
+        So this method will always relocate register 21-28 to the END of the register array
+        Voice4 will start from registry 25.
+       
+
 	4.2007 ch
 
 ************************************************************************/
+
+uint8_t SID::translateRegnum(uint8_t regnum){
+	// Relocation: 21-28 register are shifted at the end
+	// Register from 29 are moved back from 21 to cover the "gap"
+	if(regnum >=29) {
+		return regnum-8;
+	}else if (regnum >=21 and regnum <=28){
+		
+		int stepback=regnum-28; 
+		int translated=NUMREGISTERS-1+stepback;
+		return translated;
+	}else{	
+		return regnum;
+	}	
+}
+
 uint8_t SID::set_register(uint8_t regnum, uint8_t value)
 {
 	if(regnum>NUMREGISTERS-1) 
 		return 0;
-		
-	Sid.sidregister[regnum]=value;
 
-	switch(regnum)
-	{
-		//voice1
+	Sid.sidregister[translateRegnum(regnum)]=value;
+
+
+	// Post-actions 
+	
+	// Every voice uses 7 registers
+	// 3 voices max is (3*7-1)=20
+	// Voice 0 is 1,5,6
+	// Voice 1 is 8,12,13
+	// Voice 2    15,19,20
+
+	/*
+	case 15:
+	  osc[2].freq_coefficient=((uint16_t)Sid.sidregister[14]+((uint16_t)Sid.sidregister[15]<<8))>>2;
+	  break;
+	case 19: setenvelope(&Sid.block.voice[2]);break;
+	case 20: setenvelope(&Sid.block.voice[2]);break;
+	*/
+	
+	int maxRegister=MAX_VOICES*7; // es 21
+	if(regnum <=maxRegister){
+		// Post Actions needed
+		int normalizedValue=regnum % 7;
+		uint8_t voiceNumber=regnum / 7;
+		switch(normalizedValue){
 		case 1:
-			osc[0].freq_coefficient=((uint16_t)Sid.sidregister[0]+((uint16_t)Sid.sidregister[1]<<8))>>2;
-			break;
-		case 5: setenvelope(&Sid.block.voice[0]);break;
-		case 6: setenvelope(&Sid.block.voice[0]);break;
-		
-		//voice2
-		case 8:
-			osc[1].freq_coefficient=((uint16_t)Sid.sidregister[7]+((uint16_t)Sid.sidregister[8]<<8))>>2;
-			break;
-		case 12: setenvelope(&Sid.block.voice[1]);break;
-		case 13: setenvelope(&Sid.block.voice[1]);break;		
-		
-		//voice3
-		case 15:
-			osc[2].freq_coefficient=((uint16_t)Sid.sidregister[14]+((uint16_t)Sid.sidregister[15]<<8))>>2;
-			break;
-		case 19: setenvelope(&Sid.block.voice[2]);break;
-		case 20: setenvelope(&Sid.block.voice[2]);break;			
-	}	
+		  osc[0+voiceNumber].freq_coefficient=((uint16_t)Sid.sidregister[0+voiceNumber]+((uint16_t)Sid.sidregister[1+(voiceNumber*7)]<<8))>>2;
+		  break;
+		// ADSR envelope update
+		case 5:
+		case 6:
+		  setenvelope(&Sid.block.voice[ voiceNumber ])
+		  break;
+
+		}
+	}
+        
 	return 1;
 }
 
@@ -427,7 +467,7 @@ uint8_t SID::get_register(uint8_t regnum)
 {
 	if(regnum>NUMREGISTERS-1)
 		return 0;
-    return Sid.sidregister[regnum];
+	return Sid.sidregister[translateRegnum(regnum)];
 }
 
 // Private Methods /////////////////////////////////////////////////////////////
@@ -568,3 +608,10 @@ void SID::playTestIntro() {
   play(VOICE2,0); 
   play(VOICE1,0); 
 }
+// Emacs suggested setup:
+/*
+    Use guessed style and try out
+    (setq-default c-basic-offset 8
+                  tab-width 8
+                  indent-tabs-mode t)
+*/

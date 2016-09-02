@@ -3,7 +3,7 @@ namespace MIDI
 /** 440hz = A4 = 0x1CD6
  * is normally used to tune instruments.
  * MIDI spec is 127 note wide, whereas SID has 94 possibilites.
- * I rescaled the two chords, putting zero where SID cannot cope 
+ * GG:I rescaled the two chords, putting zero where SID cannot cope 
  */
 
 const uint16_t midi2sidMapper[]={

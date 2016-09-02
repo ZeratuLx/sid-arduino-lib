@@ -24,8 +24,14 @@
 
 #include <inttypes.h>
 
-#define NUMREGISTERS 29
-#define OSCILLATORS 3
+// GG Hacked to provide 4 voices
+// The system is parametric Must be 3 or greather, not less.
+
+const int MAX_VOICES=4; 
+// Std: 29 -> 3 voices
+#define NUMREGISTERS (29+(MAX_VOICES-3)*7)
+#define OSCILLATORS MAX_VOICES
+
 #define MAXLEVEL ( 0xFFFF / OSCILLATORS )
 #define SUSTAINFACTOR ( MAXLEVEL / 15 )
 
@@ -38,8 +44,12 @@
 
 // SID Registers
 #define VOICE1	0
-#define VOICE2	7
 #define VOICE3	14
+
+// Left One:
+#define VOICE2	7
+#define VOICE4	29
+
 #define CONTROLREG 4
 #define ATTACKDECAY 5
 #define SUSTAINRELEASE 6
@@ -48,6 +58,8 @@
 #define VOICE1_Right 0
 #define VOICE3_Right 14
 #define VOICE2_Left  7
+#define VOICE4_Left  29
+
 
 
 // SID voice control register bits
@@ -76,22 +88,25 @@ typedef struct
 	uint8_t		SustainRelease;	// bit0-3 release, bit4-7 sustain
 } Voice_t;
 
+/** TODO GG to support more then 3 voices, the union should be re-arranged in some way
+ *  
+ */
 typedef struct
 {
-	Voice_t voice[3];
+	Voice_t voice[MAX_VOICES];
 	uint16_t FC;		// not implemented
 	uint8_t RES_Filt;	// partly implemented
 	uint8_t Mode_Vol;	// partly implemented
 	uint8_t POTX;		// not implemented
 	uint8_t POTY;		// not implemented
 	uint8_t OSC3_Random;// not implemented
-	uint8_t ENV3;		// not implemented
+	uint8_t ENV3;		// not implemented        
 } Blocks_t;
 
 typedef union
 {
 	Blocks_t block;
-	uint8_t sidregister[NUMREGISTERS];
+	uint8_t  sidregister[NUMREGISTERS];
 } Sid_t;
 
 typedef struct
