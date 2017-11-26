@@ -75,10 +75,10 @@ Is up to the client to know how to use this stereo capability.
 const static uint16_t AttackRate[16]={2,4,16,24,38,58,68,80,100,250,500,800,1000,3000,5000,8000};
 const static uint16_t DecayReleaseRate[16]={6,24,48,72,114,168,204,240,300,750,1500,2400,3000,9000,15000,24000};
 	
-static uint8_t rightOutput;   // pin9
-static uint8_t leftOutput;    // pin 10 GG Addon for StereoSID
-static Sid_t Sid;
-static Oscillator_t osc[OSCILLATORS];
+static uint8_t rightOutput;   // pin9   Sid1
+static uint8_t leftOutput;    // pin 10 Sid2
+static Sid_t Sid1,Sid2; 
+static Oscillator_t osc[OSCILLATORS*2];
 /**
  * Initialize Arduino Register. Take control of Timer 1 and Timer 2.
  * Timer 1 will be used for PWM output (aka Analog-approximation)
@@ -167,11 +167,11 @@ static int8_t wave(Voice_t *voice, uint16_t phase)
 
 static uint8_t  remapDirectFilter(uint16_t temp, uint16_t temp1);
 
-static void waveforms()
+static void waveforms(Sid_t& Sid)
 {
 	static uint16_t phase[OSCILLATORS], sig[OSCILLATORS];
 	static int16_t temp,temp1;
-	static uint8_t i,j,k;
+	static uint8_t i,j,k,oscIndex;
 	static uint16_t noise = 0xACE1;
 	static uint8_t noise8;
 	static uint16_t tempphase;
@@ -180,22 +180,31 @@ static void waveforms()
 	noise = (noise >> 1) ^ (-(noise & 1) & 0xB400u);	
 	noise8 = noise>>8;
 	
+	uint8_t start;		
+	if( &Sid == &Sid1){
+		start=0;
+	}else{
+		start=OSCILLATORS ; // Start on second group
+	}
+
 	for(i = 0; i< OSCILLATORS; i++)
-	{
+	{		
 		j = (i == 0 ? 2 : i - 1);
-		tempphase=phase[i]+osc[i].freq_coefficient; //0.88us
+		oscIndex= i+start;
+		
+		tempphase=phase[i]+osc[oscIndex].freq_coefficient; //0.88us
 		if(Sid.block.voice[i].ControlReg&NOISE)
 		{				
-			if((tempphase^phase[i])&0x4000) sig[i]=noise8*osc[i].envelope;			
+			if((tempphase^phase[i])&0x4000) sig[i]=noise8*osc[oscIndex].envelope;			
 		}
 		else
 		{
 			if(Sid.block.voice[i].ControlReg&RINGMOD)
 			{				
 				if(phase[j]&0x8000) 
-					sig[i]=osc[i].envelope*-wave(&Sid.block.voice[i],phase[i]);
+					sig[i]=osc[oscIndex].envelope*-wave(&Sid.block.voice[i],phase[i]);
 				else 
-					sig[i]=osc[i].envelope*wave(&Sid.block.voice[i],phase[i]);
+					sig[i]=osc[oscIndex].envelope*wave(&Sid.block.voice[i],phase[i]);
 			}
 			else 
 			{
@@ -205,7 +214,7 @@ static void waveforms()
 						phase[i] = 0;
 				}
 				else 
-					sig[i]=osc[i].envelope*wave(&Sid.block.voice[i],phase[i]); //2.07us
+					sig[i]=osc[oscIndex].envelope*wave(&Sid.block.voice[i],phase[i]); //2.07us
 			}
 		}
 		phase[i]=tempphase;
@@ -214,18 +223,12 @@ static void waveforms()
 	// voice filter selection
 	temp=0; // direct output variable
 	temp1=0; // filter output variable
+
 	if(Sid.block.RES_Filt&FILT1) temp1+=sig[0];
 	else temp+=sig[0];
-
-        {
-          uint16_t directVoice2=0, filterVoice2=0;
-          if(Sid.block.RES_Filt&FILT2) filterVoice2+=sig[1];
-          else directVoice2+=sig[1];
-          // VOICE2 Only
-          leftOutput= remapDirectFilter( directVoice2, filterVoice2);
-        }
-        
-        if(Sid.block.RES_Filt&FILT3) temp1+=sig[2];
+	if(Sid.block.RES_Filt&FILT2) temp1+=sig[1];
+	else temp+=sig[1];
+	if(Sid.block.RES_Filt&FILT3) temp1+=sig[2];
 	else if(!(Sid.block.Mode_Vol&VOICE3OFF))temp+=sig[2]; // voice 3 with special turn off bit
 
 	//filterOutput = IIR2((struct IIR_filter*)&filter04_06, filterInput);
@@ -233,11 +236,22 @@ static void waveforms()
 
         k=remapDirectFilter(temp,temp1);
         
-
+	// leftOutput, rightOutput choice
         // Output to PWM:
-	rightOutput = k;
+	if( &Sid == &Sid1){
+		rightOutput = k; //Sid1
+	}else{
+		leftOutput  = k; //Sid2
+	}
 
 }
+
+
+static void waveforms(){
+	waveforms(Sid1);
+	waveforms(Sid2);
+}
+
 /** GG: This class merges direct and filter-ed output, anyway
  *      no real filter is implemented.
  */
@@ -247,47 +261,62 @@ static uint8_t  remapDirectFilter(uint16_t temp, uint16_t temp1){
   return k;
 }
 
-static void envelopes()
+static void envelopes(Sid_t& Sid)
 {
+	uint8_t start,oscIndex;		
+	if( &Sid == &Sid1){
+		start=0;
+	}else{
+		start=OSCILLATORS ; // Start on second group
+	}
+	
 	uint8_t n;
 	uint8_t controll_regadr[OSCILLATORS]={4,11,18};
 	// if gate is ONE then the attack,decay,sustain cycle begins
 	// if gate switches to zero the sound decays
 	for(n=0;n<OSCILLATORS;n++)
 	{
+		oscIndex=n+start;
 		if(Sid.sidregister[controll_regadr[n]]&GATE) // if gate set then attack,decay,sustain
 		{
-			if(osc[n].attackdecay_flag) 
+			if(osc[oscIndex].attackdecay_flag) 
 			{	// if attack cycle
-				osc[n].amp+=osc[n].m_attack;
-				if(osc[n].amp>MAXLEVEL)
+				osc[oscIndex].amp+=osc[oscIndex].m_attack;
+				if(osc[oscIndex].amp>MAXLEVEL)
 				{
-					osc[n].amp=MAXLEVEL;
-					osc[n].attackdecay_flag=false; // if level reached, then switch to decay
+					osc[oscIndex].amp=MAXLEVEL;
+					osc[oscIndex].attackdecay_flag=false; // if level reached, then switch to decay
 				}
 			}
 			else // decay cycle
 			{
-				if(osc[n].amp>osc[n].level_sustain)
+				if(osc[oscIndex].amp>osc[oscIndex].level_sustain)
 				{
-					osc[n].amp-=osc[n].m_decay;
-					if(osc[n].amp<osc[n].level_sustain) osc[n].amp=osc[n].level_sustain;
+					osc[oscIndex].amp-=osc[oscIndex].m_decay;
+					if(osc[oscIndex].amp<osc[oscIndex].level_sustain) osc[oscIndex].amp=osc[oscIndex].level_sustain;
 				}
 
 			} 
 		}
 		else // if gate flag is not set then release
 		{
-			osc[n].attackdecay_flag=true; // at next attack/decay cycle start wiht attack
-			if(osc[n].amp>0)
+			osc[oscIndex].attackdecay_flag=true; // at next attack/decay cycle start wiht attack
+			if(osc[oscIndex].amp>0)
 			{
-				osc[n].amp-=osc[n].m_release;
-				if(osc[n].amp<0) osc[n].amp=0;
+				osc[oscIndex].amp-=osc[oscIndex].m_release;
+				if(osc[oscIndex].amp<0) osc[oscIndex].amp=0;
 			}			
 		}
-		osc[n].envelope=osc[n].amp>>8;
+		osc[oscIndex].envelope=osc[oscIndex].amp>>8;
 	}
 }
+
+
+static void computeAllenvelopes(){
+	envelopes(Sid1);
+	envelopes(Sid2);
+}
+
 
 /************************************************************************
 
@@ -299,7 +328,7 @@ static void envelopes()
 ISR(TIMER1_OVF_vect)
 {
 	OCR1A = rightOutput; // Output to PWM
-        OCR1B = leftOutput;
+    OCR1B = leftOutput;
 }
 
 
@@ -320,11 +349,13 @@ ISR(TIMER2_COMP_vect)
 	
 	if(mscounter++ >= MSCOUNT)
 	{
-		envelopes(); //~16us
+		computeAllenvelopes();  //~16us ??
 		mscounter = 0;
 	}
 }
 #else
+
+// ARduino UNO HERE
 
 ISR(TIMER2_COMPA_vect)
 {
@@ -334,7 +365,7 @@ ISR(TIMER2_COMPA_vect)
 	
 	if(mscounter++ >= MSCOUNT)
 	{
-		envelopes(); //~16us
+		computeAllenvelopes(); //~16us ??
 		mscounter = 0;
 	}
 }
@@ -346,20 +377,31 @@ ISR(TIMER2_COMPA_vect)
 void SID::begin()
 {
 	pinMode(9, OUTPUT);
-        pinMode(10, OUTPUT);
+    pinMode(10, OUTPUT);
+	if(DEBUG){
+		Serial.begin(9600);
+		Serial.println(F("Debug mode Activated"));
+	}
 	initialize();
 		
 	//initialize SID-registers	
-	Sid.sidregister[6]=0xF0;
-	Sid.sidregister[13]=0xF0;
-	Sid.sidregister[20]=0xF0;
+	Sid1.sidregister[6]=0xF0;
+	Sid1.sidregister[13]=0xF0;
+	Sid1.sidregister[20]=0xF0;
+
+	Sid2.sidregister[6]=0xF0;
+	Sid2.sidregister[13]=0xF0;
+	Sid2.sidregister[20]=0xF0;
 
 	
 	// set all amplitudes to zero
 	for(int n=0;n<OSCILLATORS;n++) {
 		osc[n].attackdecay_flag=true;
-		setenvelope(&Sid.block.voice[n]);
+		osc[n+OSCILLATORS].attackdecay_flag=true;
+		setEnvelope(Sid1, &Sid1.block.voice[n]);
+		setEnvelope(Sid2, &Sid2.block.voice[n]);
 		osc[n].amp=0;
+		osc[n+OSCILLATORS].amp=0;
 	}
 }
 
@@ -382,37 +424,60 @@ void SID::begin()
 	4.2007 ch
 
 ************************************************************************/
-uint8_t SID::set_register(uint8_t regnum, uint8_t value)
+uint8_t SID::set_registerOnSid(Sid_t& Sid, uint8_t regnum, uint8_t value)
 {
 	if(regnum>NUMREGISTERS-1) 
 		return 0;
 		
 	Sid.sidregister[regnum]=value;
+	uint8_t start;
+	if( &Sid == &Sid1){
+		start=0;		
+		if(DEBUG) { Serial.print(F("SID1 OUT="));Serial.println(rightOutput);}
+	}else{
+		start=OSCILLATORS ; // Start on second group
+		if(DEBUG) { Serial.print(F("SID2 OUT="));Serial.println(leftOutput);}
+	}
 
 	switch(regnum)
 	{
 		//voice1
 		case 1:
-			osc[0].freq_coefficient=((uint16_t)Sid.sidregister[0]+((uint16_t)Sid.sidregister[1]<<8))>>2;
+			osc[start+0].freq_coefficient=((uint16_t)Sid.sidregister[0]+((uint16_t)Sid.sidregister[1]<<8))>>2;
 			break;
-		case 5: setenvelope(&Sid.block.voice[0]);break;
-		case 6: setenvelope(&Sid.block.voice[0]);break;
+		case 5: setEnvelope(Sid, &Sid.block.voice[0]);break;
+		case 6: setEnvelope(Sid, &Sid.block.voice[0]);break;
 		
 		//voice2
 		case 8:
-			osc[1].freq_coefficient=((uint16_t)Sid.sidregister[7]+((uint16_t)Sid.sidregister[8]<<8))>>2;
+			osc[start+1].freq_coefficient=((uint16_t)Sid.sidregister[7]+((uint16_t)Sid.sidregister[8]<<8))>>2;
 			break;
-		case 12: setenvelope(&Sid.block.voice[1]);break;
-		case 13: setenvelope(&Sid.block.voice[1]);break;		
+		case 12: setEnvelope(Sid, &Sid.block.voice[1]);break;
+		case 13: setEnvelope(Sid, &Sid.block.voice[1]);break;		
 		
 		//voice3
 		case 15:
-			osc[2].freq_coefficient=((uint16_t)Sid.sidregister[14]+((uint16_t)Sid.sidregister[15]<<8))>>2;
+			osc[start+2].freq_coefficient=((uint16_t)Sid.sidregister[14]+((uint16_t)Sid.sidregister[15]<<8))>>2;
 			break;
-		case 19: setenvelope(&Sid.block.voice[2]);break;
-		case 20: setenvelope(&Sid.block.voice[2]);break;			
+		case 19: setEnvelope(Sid, &Sid.block.voice[2]);break;
+		case 20: setEnvelope(Sid, &Sid.block.voice[2]);break;			
 	}	
 	return 1;
+}
+
+uint8_t SID::set_register(uint8_t regnum, uint8_t value)
+{
+	return set_registerOnSid(Sid1,regnum,value);
+}
+
+/** Set register for Sid1 */
+uint8_t SID::set_registerSid1(uint8_t regnum, uint8_t value) {
+ return set_registerOnSid(Sid1,regnum,value);
+}
+
+/** Set register for Sid1 */
+uint8_t SID::set_registerSid2(uint8_t regnum, uint8_t value) {
+ set_registerOnSid( Sid2, regnum,  value);
 }
 
 /************************************************************************
@@ -423,7 +488,7 @@ uint8_t SID::set_register(uint8_t regnum, uint8_t value)
 	If an invalid register is requested it returns zero.
 
 ************************************************************************/
-uint8_t SID::get_register(uint8_t regnum)
+uint8_t SID::get_register(Sid_t& Sid, uint8_t regnum)
 {
 	if(regnum>NUMREGISTERS-1)
 		return 0;
@@ -433,34 +498,43 @@ uint8_t SID::get_register(uint8_t regnum)
 // Private Methods /////////////////////////////////////////////////////////////
 // Functions only available to other functions in this library
 
-uint8_t SID::get_wavenum(Voice_t *voice)
+/** get_wavenum -> [0,OSCILLATORS*2]
+ * 
+ */
+uint8_t SID::get_wavenum(Sid_t& Sid, Voice_t *voice)
 {
 	uint8_t n;
 
 	if(voice==&Sid.block.voice[0]) n=0;
 	if(voice==&Sid.block.voice[1]) n=1;
 	if(voice==&Sid.block.voice[2]) n=2;
-	
+				
+	if( &Sid == &Sid2){
+		n+=OSCILLATORS ; // Start on second group
+	}
+
+	if(DEBUG) { Serial.print(F("WAVE INDEX="));Serial.println(n);}
 	return n;
 }
 
-void SID::setfreq(Voice_t *voice,uint16_t freq)
+void SID::setfreq(Sid_t& Sid, Voice_t *voice,uint16_t freq)
 {
 	uint32_t templong;
 	uint8_t n;
 
-	n=get_wavenum(voice);
+	n=get_wavenum(Sid,voice);
 	
 	templong=freq;
+
 	osc[n].freq_coefficient=templong*4000/SAMPLEFREQ;
 }
 
 
-void SID::setenvelope(Voice_t *voice)
+void SID::setEnvelope(Sid_t& Sid, Voice_t *voice)
 {
 	uint8_t n;
 	
-	n=get_wavenum(voice);
+	n=get_wavenum(Sid, voice);
 	osc[n].attackdecay_flag=true;
 
 	osc[n].level_sustain=(voice->SustainRelease>>4)*SUSTAINFACTOR;

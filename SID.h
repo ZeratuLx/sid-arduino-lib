@@ -23,8 +23,11 @@
 #define SID_h
 
 #include <inttypes.h>
+const bool DEBUG=true;
+// Stereo Sid brings two SID for a total of 8 voice
 
 #define NUMREGISTERS 29
+/// MMM keep this value constant?
 #define OSCILLATORS 3
 #define MAXLEVEL ( 0xFFFF / OSCILLATORS )
 #define SUSTAINFACTOR ( MAXLEVEL / 15 )
@@ -113,7 +116,13 @@ class SID
   public:
 	void begin();
     uint8_t set_register(uint8_t regnum, uint8_t value);
-    uint8_t get_register(uint8_t regnum);
+
+	uint8_t set_registerSid1(uint8_t regnum, uint8_t value);
+
+	uint8_t set_registerSid2(uint8_t regnum, uint8_t value);
+    
+	
+    // DISAB uint8_t get_register(uint8_t regnum);
     void playTestIntro();
   // GG: Addon facilities
   void loadPiano(uint8_t voice);
@@ -124,10 +133,12 @@ class SID
   
   // library-accessible "private" interface  
   private:
-    uint8_t get_wavenum(Voice_t *voice);
-	void setfreq(Voice_t *voice,uint16_t freq);
+    uint8_t get_register(Sid_t& Sid, uint8_t regnum);
+    uint8_t get_wavenum(Sid_t& Sid, Voice_t *voice);
+	void setfreq(Sid_t& Sid, Voice_t *voice,uint16_t freq);
 	void init_waveform(Voice_t *voice);
-	void setenvelope(Voice_t *voice);
+	void setEnvelope(Sid_t& Sid,Voice_t *voice);
+	uint8_t set_registerOnSid(Sid_t& Sid, uint8_t regnum, uint8_t value);
 };
 
 #endif
